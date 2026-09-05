@@ -1,14 +1,13 @@
 # Import required libraries
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
 
-from torch import Tensor, nn, optim
+from torch import nn, optim
 from torchmetrics import AUROC, Accuracy, F1Score, Precision, Recall, ConfusionMatrix
 from torchmetrics.functional.classification import binary_f1_score, binary_recall, binary_precision
 
 # Import custom modules
-from training.loss import edl_digamma_loss, edl_log_loss, edl_mse_loss
+from training.loss import edl_digamma_loss, edl_mse_loss
 from utils import one_hot_embedding, relu_evidence
 from training.training_utils import update_uncertainty_statistics, log_uncertainty_statistics
 from training.metrics import (
@@ -31,6 +30,7 @@ from evaluation.plots import (
 
 
 class PedestrianCrossingLightningModule(pl.LightningModule):
+    # PyTorch Lightning module for pedestrian crossing-intention prediction.
     def __init__(
         self,
         model,
@@ -49,6 +49,8 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
     ):
         super().__init__()
 
+        # Store all hyperparameters in the Lightning checkpoint
+        # ignore the model itself to avoid serialization issues.
         self.save_hyperparameters(ignore=["model"])
 
         self.model = model
@@ -64,15 +66,15 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
 
         self.evidential_loss_name = evidential_loss
 
+        # Training objective 
         if uncertainty:
             loss_functions = {
                 "mse": edl_mse_loss,
-                "log": edl_log_loss,
                 "digamma": edl_digamma_loss,
             }
 
             if evidential_loss not in loss_functions:
-                raise ValueError("loss function must be one of: 'mse', 'log', or 'digamma'.")
+                raise ValueError("loss function must be 'mse' or 'digamma'.")
 
             self.loss_function = loss_functions[evidential_loss]
         else:
@@ -85,6 +87,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         self.validation_targets = []
         self.validation_uncertainties = []
 
+        # Epoch-level values used for plots.
         self.validation_history = {
             "epoch": [],
             "f1": [],
@@ -132,6 +135,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
 
     @classmethod
     def from_config(cls, model, config):
+        # Create a Lightning module from a configuration dictionary.
         train_opts = config["train_opts"]
         uncertainty_opts = config.get("uncertainty_opts", {})
         scheduler_opts = config.get("scheduler", {})
@@ -158,16 +162,18 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         return self.model(x)
 
     def _prepare_batch(self, batch):
+        # Convert one batch to the dtype expected by the model.
         x, y = batch
-
         model_dtype = next(self.model.parameters()).dtype
 
-        x = x.to(dtype=model_dtype)
-        y = y.reshape(-1).long()
+        return (
+            x.to(dtype=model_dtype),
+            y.reshape(-1).long()
+        )
 
-        return x, y
 
     def _shared_step(self,batch):
+        # Compute loss, probabilities and uncertainty for one batch.
         x, y = self._prepare_batch(batch)
 
         outputs = self.model(x)
@@ -182,7 +188,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
                 dtype=outputs.dtype,
             )
 
-            # Compute the selected evidential loss (MSE, log, or digamma).
+            # Compute the selected evidential loss.
             # The annealing term gradually introduces the KL regularisation during training.
             loss = self.loss_function(
                 outputs,
@@ -213,6 +219,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
 
             uncertainty = None
 
+        # Crossing-class probability.
         positive_probability = probabilities[:, 1]
 
         return loss, probabilities, positive_probability, y, uncertainty
@@ -353,7 +360,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
             best_threshold = self.fixed_threshold
     
 
-        # Compute ALL validation metrics at selected threshold
+        # Compute all validation metrics at selected threshold
         best_threshold_predictions = (positive_probabilities >= best_threshold).long()
         best_val_f1 = binary_f1_score(best_threshold_predictions, validation_targets)
         best_precision = binary_precision(best_threshold_predictions, validation_targets)
@@ -365,8 +372,9 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         if current_best_f1 > self.best_validation_f1:
             self.best_validation_f1 = current_best_f1
 
-            # Track the best validation epoch across training
+            # Track the globally best validation epoch with its threshold
             self.best_validation_epoch = int(self.current_epoch + 1)
+            self.best_threshold = float(best_threshold)
 
             print(
                 "BEST_EPOCH "
@@ -376,9 +384,9 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
             )
 
         # Store this epoch's selected threshold in the model.
-        self.best_threshold = best_threshold
         self.decision_threshold.fill_(best_threshold)
 
+        # Validation logging 
         self.log(
             "val_accuracy",
             val_accuracy,
@@ -496,7 +504,8 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         else:
             self.validation_history["uncertainty"].append(float("nan"))
 
-
+        # Epoch summary. Metrics labelled @0.5 use threshold 0.5values; 
+        # "best" metrics use the validation-selected threshold.
         output = (
             f"\nEpoch {self.current_epoch}: "
             f"val_f1@0.5={val_f1.item():.4f}, "
@@ -518,30 +527,32 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
 
         print(output)
 
+        # Reset per-epoch validation state
         self.val_accuracy.reset()
         self.val_precision.reset()
         self.val_recall.reset()
         self.val_f1.reset()
         self.val_auroc.reset()
 
-
         self.validation_class_probabilities.clear()
         self.validation_targets.clear()
         self.validation_uncertainties.clear()
 
     def on_fit_end(self):
-
+        # Create validation-history plots after training finishes.
         epochs = self.validation_history["epoch"]
 
         if not epochs:
             return
 
         # Validation F1
-        fig, _ = plot_validation_model_selection(
+        fig = plot_validation_model_selection(
             epochs=self.validation_history["epoch"],
-            validation_f1=self.validation_history["f1"],
-            selected_thresholds=self.validation_history["threshold"],
+            f1_values=self.validation_history["f1"],
+            thresholds=self.validation_history["threshold"],
             best_epoch=self.best_validation_epoch,
+            best_f1=self.best_validation_f1,
+            best_threshold=self.best_threshold,
         )
 
         log_figure(
@@ -558,7 +569,6 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
             ylabel="Expected Calibration Error (ECE)",
             title="Validation Calibration Across Epochs",
             best_epoch=self.best_validation_epoch,
-            label="ECE",
         )
 
         log_figure(
@@ -575,7 +585,6 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
             ylabel="Brier Score",
             title="Validation Brier Score Across Epochs",
             best_epoch=self.best_validation_epoch,
-            label="Brier Score",
         )
 
         log_figure(
@@ -593,7 +602,6 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
                 ylabel="Mean Evidential Uncertainty",
                 title="Validation Uncertainty Across Epochs",
                 best_epoch=self.best_validation_epoch,
-                label="Mean Uncertainty",
             )
 
             log_figure(
@@ -611,6 +619,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         # using the decision threshold selected from validation data.
         test_predictions = (positive_probability >= self.decision_threshold).long()
 
+        # Store test outputs for calibration, erroranalysis and plotting.
         self.test_class_probabilities.append(probabilities.detach().cpu())
         self.test_targets.append(targets.detach().cpu())
         self.test_predictions.append(test_predictions.detach().cpu())
@@ -656,7 +665,8 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         )
         
     def on_test_epoch_end(self):
-
+        # Aggregate test metrics and create plots for analysis. 
+        # Called at the end of the test epoch.
         test_accuracy = self.test_accuracy.compute()
         test_precision = self.test_precision.compute()
         test_recall = self.test_recall.compute()
@@ -683,6 +693,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
 
         positive_test_probabilities = test_probabilities[:, 1]
 
+        # Calibration metrics
         test_ece = expected_calibration_error(
             class_probabilities=test_probabilities,
             targets=test_targets,
@@ -694,7 +705,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
             targets=test_targets,
         )
 
-        # Uncertainty metrics
+        # Uncertainty metrics / selective prediction metrics
         test_aurc = None
         test_coverage = None
         test_risk = None
@@ -706,7 +717,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
                 dim=0,
             )
 
-            test_coverage, test_risk = risk_coverage_curve(
+            test_coverage, test_risk, _ = risk_coverage_curve(
                 uncertainty=test_uncertainties,
                 predictions=test_predictions,
                 targets=test_targets,
@@ -837,7 +848,7 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
         print(f"False Positive Rate: {false_positive_rate.item():.4f}")
         print(f"False Negative Rate: {false_negative_rate.item():.4f}")
 
-        # Reset
+        # Reset test state for next test run
         self.test_accuracy.reset()
         self.test_precision.reset()
         self.test_recall.reset()
@@ -852,6 +863,8 @@ class PedestrianCrossingLightningModule(pl.LightningModule):
 
 
     def configure_optimizers(self):
+        # Configure Adam optimisation and cosine-annealing learning rate.
+
         optimizer = optim.Adam(
             self.parameters(),
             lr=self.learning_rate,

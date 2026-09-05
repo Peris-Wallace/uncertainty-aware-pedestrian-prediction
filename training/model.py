@@ -43,7 +43,7 @@ class PositionalEncoding(nn.Module):
 
 
 class PedestrianCrossingTransformer(nn.Module):
-    # Transformer used for pedestrian crossing-intention prediction.
+    # Transformer used for pedestrian crossing prediction.
 
     def __init__(
         self,
