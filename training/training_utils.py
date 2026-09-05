@@ -1,272 +1,42 @@
 from pathlib import Path
-
+import numpy as np
 import torch
 from torchinfo import summary
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
-from training.dataset import prepare_data, tabular_transformer, VideoMAEDataset
-from training.model import PedestrianCrossingTransformer, VideoMAEClassifier
+from training.dataset import prepare_data, PIECrossingDataset
+from training.model import TabularTransformer
 from utils import TrainingTimeCallback, flatten_config
 
 
-def get_model_dtype(config):
-    dtype_name = config['net_opts'].get('dtype', 'float64').lower()
-
-    if dtype_name == 'float64': return torch.float64
-    if dtype_name == 'float32': return torch.float32
-
-    raise ValueError("net_opts.dtype must be 'float32' or 'float64'.")
 
 
-def create_datasets(config, dtype=None):
+def create_datasets(config):
 
-    data_dtype = (
-        dtype
-        if dtype is not None
-        else get_model_dtype(config)
-    )
+    prepared = prepare_data(dataset="PIE", configs=config)
 
-    prepared = prepare_data(
-        dataset="PIE",
-        configs=config,
-    )
-
-    feature_opts = config.get(
-        "feature_opts",
-        {},
-    )
-
-    visual_config = config.get(
-        "visual_features",
-        {},
-    )
-
-    visual_enabled = bool(
-        visual_config.get(
-            "enabled",
-            False,
-        )
-    )
-
-    visual_encoder = (
-        visual_config.get(
-            "encoder",
-            None,
-        )
-        if visual_enabled
-        else None
-    )
-
-    valid_encoders = {
-        "resnet18",
-        "videomae",
+    feature_opts = config.get("feature_opts", {})
+    expected_input_dim = config["net_opts"]["input_dimension"]
+   
+    dataset_args = {
+        "feature_opts": feature_opts,
+        "expected_input_dim": expected_input_dim,
+        "dtype": torch.float64,
     }
 
-    if (
-        visual_enabled
-        and visual_encoder
-        not in valid_encoders
-    ):
-        raise ValueError(
-            "Visual features are enabled, "
-            f"but encoder='{visual_encoder}' "
-            f"is invalid. Expected one of "
-            f"{valid_encoders}."
-        )
-
-    # ---------------------------------------------------------
-    # Select encoder-specific visual configuration
-    # ---------------------------------------------------------
-
-    if visual_enabled:
-
-        if visual_encoder == "resnet18":
-            encoder_config = config.get(
-                "resnet_features",
-                {},
-            )
-
-        elif visual_encoder == "videomae":
-            encoder_config = config.get(
-                "videomae_features",
-                {},
-            )
-
-    else:
-        encoder_config = {}
-
-
-    def visual_split(split):
-        """
-        Return visual feature configuration for one dataset split.
-
-        visual_features.enabled
-            controls whether visual information is used.
-
-        visual_features.encoder
-            selects the representation type:
-            - resnet18
-            - videomae
-        """
-
-        if not visual_enabled:
-            return {
-                "enabled": False,
-                "encoder": None,
-                "feature_dim": 0,
-                "feature_file": None,
-            }
-
-        file_key = (
-            f"{split}_file"
-        )
-
-        if file_key not in encoder_config:
-            raise KeyError(
-                f"Visual encoder '{visual_encoder}' "
-                f"is enabled, but "
-                f"'{file_key}' is missing from "
-                f"its configuration."
-            )
-
-        visual_file = Path(
-            encoder_config[file_key]
-        ).expanduser().resolve()
-
-        if not visual_file.exists():
-            raise FileNotFoundError(
-                f"Visual feature file for "
-                f"split '{split}' does not exist:\n"
-                f"{visual_file}"
-            )
-
-        feature_dim = int(
-            encoder_config.get(
-                "feature_dim",
-                512
-                if visual_encoder == "resnet18"
-                else 768,
-            )
-        )
-
-        return {
-            "enabled": True,
-            "encoder": visual_encoder,
-            "feature_dim": feature_dim,
-            "feature_file": str(
-                visual_file
-            ),
-        }
-
-
-    expected_input_dim = config[
-        "net_opts"
-    ][
-        "input_dimension"
-    ]
-
-
-    # ---------------------------------------------------------
-    # VideoMAE is clip-level, not frame-level.
-    # ---------------------------------------------------------
-
-    if (
-        visual_enabled
-        and visual_encoder == "videomae"
-    ):
-
-        train_opts = visual_split(
-            "train"
-        )
-
-        val_opts = visual_split(
-            "val"
-        )
-
-        test_opts = visual_split(
-            "test"
-        )
-
-        train_dataset = VideoMAEDataset(
-            set_data=prepared.train_data,
-            feature_file=train_opts[
-                "feature_file"
-            ],
-            feature_dim=train_opts[
-                "feature_dim"
-            ],
-            dtype=data_dtype,
-        )
-
-        val_dataset = VideoMAEDataset(
-            set_data=prepared.val_data,
-            feature_file=val_opts[
-                "feature_file"
-            ],
-            feature_dim=val_opts[
-                "feature_dim"
-            ],
-            dtype=data_dtype,
-        )
-
-        test_dataset = VideoMAEDataset(
-            set_data=prepared.test_data,
-            feature_file=test_opts[
-                "feature_file"
-            ],
-            feature_dim=test_opts[
-                "feature_dim"
-            ],
-            dtype=data_dtype,
-        )
-
-    else:
-
-        # -----------------------------------------------------
-        # Existing tabular / ResNet sequence pipeline
-        # -----------------------------------------------------
-
-        train_dataset = tabular_transformer(
-            prepared.train_data,
-            feature_opts=feature_opts,
-            expected_input_dim=expected_input_dim,
-            visual_opts=visual_split(
-                "train"
-            ),
-            dtype=data_dtype,
-        )
-
-        val_dataset = tabular_transformer(
-            prepared.val_data,
-            feature_opts=feature_opts,
-            expected_input_dim=expected_input_dim,
-            visual_opts=visual_split(
-                "val"
-            ),
-            dtype=data_dtype,
-        )
-
-        test_dataset = tabular_transformer(
-            prepared.test_data,
-            feature_opts=feature_opts,
-            expected_input_dim=expected_input_dim,
-            visual_opts=visual_split(
-                "test"
-            ),
-            dtype=data_dtype,
-        )
-
-
     return {
-        "train": train_dataset,
-        "val": val_dataset,
-        "test": test_dataset,
+        "train": PIECrossingDataset(prepared.train_data, **dataset_args),
+        "val": PIECrossingDataset(prepared.val_data, **dataset_args),
+        "test": PIECrossingDataset(prepared.test_data, **dataset_args),
     }
 
 
 def create_dataloaders(config, datasets, seed):
+    """Create DataLoaders for train, validation and test splits.
+    Only the training loader is shuffled. Validation and test order are kept
+    fixed so repeated evaluation uses the same sample ordering. """
 
     train_dataset = datasets["train"]
     val_dataset = datasets["val"]
@@ -312,8 +82,98 @@ def create_dataloaders(config, datasets, seed):
     }
 
 
-def verify_dataset(config, datasets, dataloaders):
+def get_binary_class_distribution(dataset):
+    # Return class-distribution statistics for a dataset.
 
+    if hasattr(dataset, "targets"):
+        labels = torch.as_tensor(dataset.targets).reshape(-1).long()
+    elif hasattr(dataset, "labels"):
+        labels = torch.as_tensor(dataset.labels).reshape(-1).long()
+    else:
+        labels = torch.tensor(
+            [int(dataset[index][-1]) for index in range(len(dataset))],
+            dtype=torch.long,
+        )
+
+    total = int(labels.numel())
+    non_crossing = int((labels == 0).sum().item())
+    crossing = int((labels == 1).sum().item())
+
+    if total == 0:
+        crossing_percentage = 0.0
+        non_crossing_percentage = 0.0
+        majority_accuracy = 0.0
+        imbalance_ratio = float("nan")
+
+    else:
+        crossing_percentage = 100.0 * crossing / total
+        non_crossing_percentage = 100.0 * non_crossing / total
+        majority_accuracy = max(crossing, non_crossing) / total
+        minority_count = min(crossing, non_crossing)
+        majority_count = max(crossing, non_crossing)
+        
+        # Ratio > 1 indicates imbalance. A perfectly balanced split gives 1:1.
+        imbalance_ratio = (
+            majority_count / minority_count
+            if minority_count > 0
+            else float("inf")
+        )
+
+    return {
+        "total": total,
+        "non_crossing": non_crossing,
+        "crossing": crossing,
+        "non_crossing_percentage": non_crossing_percentage,
+        "crossing_percentage": crossing_percentage,
+        "majority_accuracy": majority_accuracy,
+        "imbalance_ratio": imbalance_ratio,
+    }
+
+
+def print_class_distribution_summary(datasets):
+    # Print class distributions for train, validation and test sets.
+
+    print("\nClass distribution")
+    print("-" * 100)
+    print(
+        f"{'Split':<12}"
+        f"{'Total':>10}"
+        f"{'Non-cross':>14}"
+        f"{'Cross':>10}"
+        f"{'Cross %':>12}"
+        f"{'Ratio':>12}"
+    )
+    print("-" * 100)
+
+    distributions = {}
+    split_names = {"train": "Train", "val": "Validation", "test": "Test"}
+    
+    for split_key, display_name in split_names.items():
+        stats = get_binary_class_distribution(datasets[split_key])
+        distributions[split_key] = stats
+
+        ratio_text = (
+            f"{stats['imbalance_ratio']:.2f}:1"
+            if np.isfinite(stats["imbalance_ratio"])
+            else "inf"
+        )
+
+        print(
+            f"{display_name:<12}"
+            f"{stats['total']:>10}"
+            f"{stats['non_crossing']:>14}"
+            f"{stats['crossing']:>10}"
+            f"{stats['crossing_percentage']:>11.2f}%"
+            f"{ratio_text:>12}"
+        )
+
+    print("-" * 100)
+    return distributions
+
+
+def verify_dataset(config, datasets, dataloaders):
+    # verify the dataset and print information about the samples, 
+    # including shapes and dtypes expected by the model
     train_dataset = datasets["train"]
     val_dataset = datasets["val"]
     test_dataset = datasets["test"]
@@ -323,211 +183,81 @@ def verify_dataset(config, datasets, dataloaders):
         (1 if config['model_opts'].get('normalize_boxes', False) else 0)
     )
 
-    expected_input_dimension = config['net_opts']['input_dimension']
+    expected_input_dimension = config["net_opts"]["input_dimension"]
+    
+    # Inspect one training sample
+    features, target = train_dataset[0]
 
     print('\nDataset verification')
     print('--------------------')
 
-    print("train_dataset type:", type(train_dataset))
-    print("train_dataset repr:", repr(train_dataset))
+    print("Train_dataset type:", type(train_dataset))
+    print("Train_dataset repr:", repr(train_dataset))
+    print(f"Train samples: {len(train_dataset)}")
+    print(f"Validation samples: {len(val_dataset)}")
+    print(f"Test samples: {len(test_dataset)}")
+    print(f"Train batches: {len(dataloaders['train'])}")
+    print("Features type:", type(features))
+    print("Features shape:", features.shape)
+    print("Target type:", type(target))
+    print("Target shape:", target.shape)
 
-    sample = train_dataset[0]
-
-    print("sample type:", type(sample))
-    print("sample repr:", repr(sample))
-
-    if isinstance(sample, (tuple, list)):
-        print("sample length:", len(sample))
-
-        for i, item in enumerate(sample):
-            print(
-                f"sample[{i}] type:",
-                type(item),
-                "shape:",
-                getattr(item, "shape", None),
-            )
-    else:
-        print(
-            "sample shape:",
-            getattr(sample, "shape", None),
+    # Each sample must be a two-dimensional sequence:
+    # [sequence_length, feature_dimension].
+    if features.ndim != 2:
+        raise ValueError(
+            "Expected sequence features with shape "
+            "[sequence_length, input_dimension], "
+            f"received {tuple(features.shape)}."
         )
 
-    features, target = sample
+    if features.shape[0] != expected_sequence_length:
+        raise ValueError(
+            f"Expected observation length {expected_sequence_length}, "
+            f"received {features.shape[0]}."
+        )
 
-    print('--------------------')
-    print(f'Train samples:      {len(train_dataset)}')
-    print(f'Validation samples: {len(val_dataset)}')
-    print(f'Test samples:       {len(test_dataset)}')
-    print(f'Train batches:      {len(dataloaders["train"])}')
-    print(f'Feature shape:      {features.shape}')
-    print(f'Feature dtype:      {features.dtype}')
-    print(f'Target:             {target}')
-    print(f'Target dtype:       {target.dtype}')
+    if features.shape[-1] != expected_input_dimension:
+        raise ValueError(
+            f"Expected input dimension {expected_input_dimension}, "
+            f"received {features.shape[-1]}."
+        )
 
-    visual_config = config.get("visual_features", {})
-    visual_enabled = bool(visual_config.get("enabled", False))
-    visual_encoder = visual_config.get("encoder", None)
+    # Print class distribution summary for train, validation and test sets.
+    class_distributions = print_class_distribution_summary(datasets)
 
-    # VideoMAE:
-    # one clip-level embedding
-    if visual_enabled and visual_encoder == "videomae":
+    return class_distributions
 
-        if features.ndim != 1:
-            raise ValueError(
-                "Expected VideoMAE features "
-                "with shape "
-                f"[{expected_input_dimension}], "
-                f"received "
-                f"{tuple(features.shape)}."
-            )
-
-        if features.shape[0] != expected_input_dimension:
-            raise ValueError(
-                "Expected VideoMAE input "
-                "dimension "
-                f"{expected_input_dimension}, "
-                f"received "
-                f"{features.shape[0]}."
-            )
-
-    # Tabular / ResNet:
-    # temporal sequence
-    else:
-
-        if features.ndim != 2:
-            raise ValueError(
-                "Expected sequence features "
-                "with shape "
-                "[sequence_length, "
-                "input_dimension], "
-                f"received "
-                f"{tuple(features.shape)}."
-            )
-
-        if features.shape[0] != expected_sequence_length:
-            raise ValueError(
-                "Expected observation length "
-                f"{expected_sequence_length}, "
-                f"received "
-                f"{features.shape[0]}."
-            )
-
-        if (
-            features.shape[-1]
-            != expected_input_dimension
-        ):
-            raise ValueError(
-                "Expected input dimension "
-                f"{expected_input_dimension}, "
-                f"received "
-                f"{features.shape[-1]}."
-            )
 
 
 def build_model(config):
+    # Construct the TabularTransformer model based on the configuration.
     model_opts = config["model_opts"]
     net_opts = config["net_opts"]
+    obs_length = model_opts["obs_length"]
 
-    visual_config = config.get(
-        "visual_features",
-        {},
+    # The current box-normalisation pipeline removes one timestep.
+    seq_len = (
+        obs_length - 1
+        if model_opts.get("normalize_boxes", False)
+        else obs_length
     )
 
-    visual_enabled = bool(
-        visual_config.get(
-            "enabled",
-            False,
-        )
+    model = TabularTransformer(
+        input_dim=net_opts["input_dimension"],
+        seq_len=seq_len,
+        d_model=net_opts.get("d_model", 8),
+        n_heads=net_opts.get("num_attention_heads", 2),
+        ff_dim=net_opts.get("ff_dim", 16),
+        num_layers=net_opts.get("num_layers", 2),
+        dropout=net_opts.get("dropout", 0.1),
     )
 
-    visual_encoder = (
-        visual_config.get(
-            "encoder",
-            None,
-        )
-        if visual_enabled
-        else None
-    )
-
-    # ---------------------------------------------------------
-    # VideoMAE
-    # ---------------------------------------------------------
-    #
-    # VideoMAE features are already clip-level:
-    #
-    #     [batch_size, 768]
-    #
-    # Therefore we use an MLP classifier rather than the
-    # temporal Transformer.
-    # ---------------------------------------------------------
-
-    if (
-        visual_enabled
-        and visual_encoder == "videomae"
-    ):
-
-        model = VideoMAEClassifier(
-            input_dim=net_opts[
-                "input_dimension"
-            ],
-            hidden_dim=net_opts.get(
-                "hidden_dimension",
-                256,
-            ),
-            dropout=net_opts.get(
-                "dropout",
-                0.3,
-            ),
-            output_dim=net_opts.get(
-                "output_dimension",
-                2,
-            ),
-        )
-
-    # ---------------------------------------------------------
-    # Tabular / ResNet
-    # ---------------------------------------------------------
-    #
-    # These inputs retain a temporal sequence:
-    #
-    #     [batch_size, sequence_length, feature_dimension]
-    #
-    # so they continue to use the Transformer.
-    # ---------------------------------------------------------
-
-    else:
-
-        obs_length = model_opts["obs_length"]
-
-        # Box normalisation removes the first timestep because
-        # coordinates are represented relative to the first /
-        # previous observation.
-        if model_opts.get("normalize_boxes", False):
-            seq_length = obs_length - 1
-        else:
-            seq_length = obs_length
-            
-
-        model = PedestrianCrossingTransformer(
-            ip_dim=net_opts["input_dimension"],
-            seq_len=seq_length,
-            d_model=net_opts["d_model"],
-            nhead=net_opts["num_attention_heads"],
-            ff_dim=net_opts["ff_dim"],
-            nlayers=net_opts["num_layers"],
-            dropout=net_opts["dropout"],
-        )
-
-    # Model dtype
-    if get_model_dtype(config) == torch.float64:
-        model = model.double()
-    else:
-        model = model.float()
-    return model
-
+    return model.to(dtype=torch.float64)
 
 
 def create_callbacks(config):
+    # Create early stopping, model checkpoint and timing callbacks.
     early = config.get('early_stopping', {})
     checkpoint = config['checkpoint']
 
@@ -537,7 +267,7 @@ def create_callbacks(config):
     callbacks = []
 
     # Add early stopping when enabled to stop training 
-    #if the chosen metric does not improve for a number of epochs.
+    #if the validation metric does not improve for a number of epochs.
     early_stopping_enabled = bool(early.get('enabled', True))
     
     if early_stopping_enabled:
@@ -561,7 +291,7 @@ def create_callbacks(config):
         early_stopping_callback = None
         print("Early stopping disabled.")
 
-
+    # Save only the best checkpoint according to the configured validation metric
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         dirpath=str(checkpoint_directory),
         monitor=checkpoint['monitor'],
@@ -573,14 +303,14 @@ def create_callbacks(config):
         save_on_train_epoch_end=False,
     )
 
-    timing_callback = TrainingTimeCallback()
-
     callbacks.append(checkpoint_callback)
-    callbacks.append(timing_callback)
+    # Total training duration
+    callbacks.append(TrainingTimeCallback())
 
     return callbacks
 
 def create_mlflow_logger(config):
+    # Create an MLFlow logger for experiment tracking and logging.
     experiment = config['experiment']
     mlflow_options = config['mlflow']
 
@@ -595,8 +325,9 @@ def create_mlflow_logger(config):
     return logger
 
 
-def log_experiment_configuration(config, logger, base_config_path, experiment_config_path, datasets, dataloaders):
-    
+def log_experiment_configuration(config, logger, base_config_path, 
+                        experiment_config_path, datasets, dataloaders):
+    # Log the experiment configuration and dataset statistics to MLFlow.
     train_dataset = datasets["train"]
     val_dataset = datasets["val"]
     test_dataset = datasets["test"]
@@ -605,17 +336,9 @@ def log_experiment_configuration(config, logger, base_config_path, experiment_co
     parameters.update(
         {
             'config.base_file':
-                str(
-                    Path(
-                        base_config_path
-                    ).expanduser().resolve()
-                ),
+                str(Path(base_config_path).expanduser().resolve()),
             'config.experiment_file':
-                str(
-                    Path(
-                        experiment_config_path
-                    ).expanduser().resolve()
-                ),
+                str(Path(experiment_config_path).expanduser().resolve()),
             'data.train_samples': len(train_dataset),
             'data.validation_samples': len(val_dataset),
             'data.test_samples': len(test_dataset),
@@ -627,7 +350,7 @@ def log_experiment_configuration(config, logger, base_config_path, experiment_co
 
 
 def create_trainer(config, logger, callbacks):
-
+    # Construct the PyTorch Lightning Trainer from the YAML configuration.
     train_opts = config['train_opts']
 
     return pl.Trainer(
@@ -642,6 +365,7 @@ def create_trainer(config, logger, callbacks):
     )
 
 def update_uncertainty_statistics(module, uncertainty, stage):
+    # Update the running sum and count of uncertainty values for a given stage.
     uncertainty = uncertainty.detach().reshape(-1)
 
     getattr(module, f"{stage}_uncertainty_sum").add_(uncertainty.sum())
@@ -649,6 +373,7 @@ def update_uncertainty_statistics(module, uncertainty, stage):
 
 
 def log_uncertainty_statistics(module, stage):
+    # Compute, log and reset the mean evidential uncertainty for an epoch.
     total_count = getattr(module, f"{stage}_uncertainty_count")
 
     mean_uncertainty = (
@@ -665,80 +390,47 @@ def log_uncertainty_statistics(module, stage):
         logger=True,
     )
 
+    # Reset accumulators so the next epoch starts from zero.
     getattr(module, f"{stage}_uncertainty_sum").zero_()
     getattr(module, f"{stage}_uncertainty_count").zero_()
     
     return {"mean": mean_uncertainty}
-
+    
 
 def save_model_summary(model, dataset, output_directory):
-    # Print the torchinfo model summary and save it as a text file.
+    """Print the torchinfo model summary and save it as a text file.
+    The summary records input/output shapes and trainable parameter counts"""
 
-    output_directory = (
-        Path(output_directory)
-        .expanduser()
-        .resolve()
-    )
-
+    output_directory = Path(output_directory).expanduser().resolve()
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    sample_features, _ = dataset[0]
-
-    model_dtype = next(model.parameters()).dtype
-
-    # Determine model input shape from dataset sample
-    if sample_features.ndim == 1:
-        # VideoMAE clip-level embedding:
-        # [768]
-        input_size = (
-            1,
-            sample_features.shape[0],
-        )
-
-    elif sample_features.ndim == 2:
-        # Temporal sequence:
-        # [sequence_length, input_dimension]
-        input_size = (
-            1,
-            sample_features.shape[0],
-            sample_features.shape[1],
-        )
-
-    else:
-        raise ValueError(
-            "Unsupported dataset feature shape for model summary: "
-            f"{tuple(sample_features.shape)}"
-        )
-
+    features, _ = dataset[0]
+    inputs = features.unsqueeze(0).to(dtype=torch.float64)
+    
     model_summary = summary(
         model,
-        input_size=input_size,
-        dtypes=[model_dtype],
+        input_data=inputs,
         device="cpu",
-        col_names=("input_size", "output_size", "num_params", "trainable"),
+        col_names=(
+            "input_size",
+            "output_size",
+            "num_params",
+            "trainable",
+        ),
         depth=5,
         verbose=0,
     )
 
     summary_path = output_directory / "model_summary.txt"
-    summary_text = str(model_summary)
-
     with summary_path.open("w", encoding="utf-8") as file:
-
         file.write("MODEL ARCHITECTURE\n")
         file.write("==================\n\n")
         file.write(str(model))
         file.write("\n\n")
-
         file.write("SUMMARY\n")
         file.write("=================\n\n")
-        file.write(summary_text)
+        file.write(str(model_summary))
         file.write("\n")
 
-    print("\nModel summary")
-    print("-------------")
-    print(model_summary)
     print(f"\nSaved model summary: {summary_path}")
-
     return summary_path
-    
