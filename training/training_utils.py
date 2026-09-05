@@ -7,7 +7,7 @@ from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
 from training.dataset import prepare_data, PIECrossingDataset
-from training.model import TabularTransformer
+from training.model import PedestrianCrossingTransformer
 from utils import TrainingTimeCallback, flatten_config
 
 
@@ -243,7 +243,7 @@ def build_model(config):
         else obs_length
     )
 
-    model = TabularTransformer(
+    model = PedestrianCrossingTransformer(
         input_dim=net_opts["input_dimension"],
         seq_len=seq_len,
         d_model=net_opts.get("d_model", 8),
