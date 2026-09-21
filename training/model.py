@@ -1,5 +1,4 @@
-# model.py
-
+# Import libraries
 import math
 import torch
 from torch import nn
