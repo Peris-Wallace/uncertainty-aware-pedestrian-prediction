@@ -1,0 +1,79 @@
+experiment:
+  name: trep
+  run_name: trep-replication-seed-42
+  tags:
+    seed: '42'
+pie_data:
+  raw_data_directory: /home/peris/MyCode/data/PIE
+  behaviour_cache_directory: /home/peris/MyCode/data/PIE_behaviour_cache/obs15
+  processed_cache_directory: /home/peris/MyCode/data/PIE_processed/obs15/orig
+  cache_enabled: true
+  use_cached_sequences: true
+  regenerate_sequences: false
+  use_cached_processed: false
+  regenerate_processed: true
+  strict_cache: true
+seed: 42
+data_opts:
+  fstride: 1
+  sample_type: beh
+  subset: default
+  data_split_type: default
+  seq_type: crossing
+  min_track_size: 76
+feature_opts:
+  use_tabular: true
+  use_center: true
+  use_area: false
+  use_aspect_ratio: false
+model_opts:
+  obs_input_type:
+  - box
+  - speed
+  - center
+  obs_length: 31
+  normalize_boxes: true
+  time_to_event:
+  - 30
+  - 60
+  overlap: 0.5
+  balance_data: false
+  generator: false
+train_opts:
+  accelerator: cuda
+  devices: 1
+  precision: 64-true
+  batch_size: 64
+  epochs: 2000
+  learning_rate: 0.005
+  weight_decay: 0.0
+  deterministic: true
+  seed: 42
+uncertainty_opts:
+  enabled: false
+evaluation:
+  tune_threshold: true
+checkpoint:
+  directory: /home/peris/MyCode/results/flip_only/obs_30_8_ratio/checkpoints/seed_42
+  monitor: val_best_threshold_f1
+  mode: max
+  save_top_k: 1
+  save_last: false
+  filename: trep-{epoch:03d}-{val_best_threshold_f1:.4f}
+scheduler:
+  enabled: true
+  name: CosineAnnealingLR
+  t_max: 64
+early_stopping:
+  enabled: true
+  monitor: val_best_threshold_f1
+  mode: max
+  patience: 100
+  min_delta: 1.0e-05
+resume:
+  enabled: false
+  checkpoint_path: null
+mlflow:
+  tracking_uri: sqlite:////home/peris/MyCode/mlflow.db
+  log_model: true
+  log_artifacts: true
