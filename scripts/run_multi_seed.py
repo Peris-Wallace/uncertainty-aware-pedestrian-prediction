@@ -85,8 +85,6 @@ UNCERTAINTY_METRICS = [
 ]
 
 # YAML helpers
-# ---------------------------------------------------------------------
-
 def load_yaml(path: Path) -> dict[str, Any]:
     # Load a YAML file and verify that it contains a dictionary.
     with path.open("r", encoding="utf-8") as file:
@@ -106,7 +104,6 @@ def save_yaml(config, path):
 
 
 # Create one configuration for each seed
-# ---------------------------------------------------------------------
 
 def create_seed_config(original_config, seed):
     # Create a temporary experiment configuration for one seed.
@@ -135,7 +132,8 @@ def create_seed_config(original_config, seed):
 
     config.setdefault("checkpoint", {})
     config["checkpoint"]["directory"] = str(seed_checkpoint_directory.resolve())
-
+    config["output_directory"] = str(OUTPUT_DIRECTORY)
+    
     # Create temporary YAML path.
     temporary_path = TEMP_CONFIG_DIRECTORY/ f"seed_{seed}.yaml"
 
@@ -176,7 +174,6 @@ def create_seed_config(original_config, seed):
 
 
 # Output parsing
-# ---------------------------------------------------------------------
 
 def extract_metric(output, pattern):
     # Extract the final occurrence of a metric from training output
