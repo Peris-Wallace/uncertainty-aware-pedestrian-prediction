@@ -1,3 +1,23 @@
+"""
+This script executes the same training configuration across 16 random seeds to
+assess the stability and reproducibility of model performance. 
+
+For each seed, it:
+
+1. Creates a temporary experiment configuration with a unique seed and
+   checkpoint directory.
+2. Launches the training script as a subprocess.
+3. Extracts validation, classification, calibration and uncertainty metrics
+   from the training output.
+4. Stores per-seed results and checkpoints.
+5. Computes aggregate statistics across completed runs, including the mean,
+   standard deviation, variance, minimum and maximum values.
+6. Saves both individual-run results and summary statistics to CSV files.
+
+For evidential models, additional uncertainty metrics such as mean uncertainty
+and area under the risk--coverage curve (AURC) are also collected.
+"""
+
 from __future__ import annotations
 import argparse
 import shutil
@@ -12,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 
 SEEDS = [
