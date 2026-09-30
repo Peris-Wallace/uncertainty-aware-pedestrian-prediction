@@ -38,9 +38,9 @@ Experiments also investigate feature representation, observation length and the 
 ├── configs/                    # Base and experiment configurations
 ├── PedestrianActionBenchmark/  # PIE data-loading utilities
 ├── data/                       # Cached PIE sequences and processed data
-├── evaluation/                 # Metrics and evaluation plots
+├── evaluation/                 # Metrics, loss and evaluation plot functions
 ├── results/                    # Experimental results
-├── scripts/                    # Multi-seed experiment utilities
+├── scripts/                    # Multi-seed experiment python file 
 ├── training/                   # Dataset, model and training components
 ├── train.py                    # Main training entry point
 ├── utils.py                    # General utilities
