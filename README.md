@@ -1,54 +1,42 @@
 # Uncertainty-Aware Pedestrian Crossing Prediction
 
 This repository contains the implementation for an uncertainty-aware pedestrian
-crossing prediction framework using Transformer-based temporal modelling and
-Evidential Deep Learning (EDL).
+crossing prediction framework using Evidential Deep Learning (EDL) for autonomous driving.
 
-The framework is evaluated on the **Pedestrian Intention Estimation (PIE)**
-dataset using structured pedestrian geometry and ego-vehicle information.
+The framework is evaluated on the **Pedestrian Intention Estimation (PIE)** dataset using structured pedestrian geometry and ego-vehicle information.
 
 ## Problem Statement
 
-Pedestrian crossing prediction is an important task in autonomous driving,
-where a vehicle must anticipate whether a pedestrian is likely to enter the
-road before the crossing action becomes directly observable.
-
-Predictive performance alone does not indicate whether a model's confidence is
-reliable. This project therefore investigates both pedestrian crossing
-classification and predictive uncertainty.
-
-The framework compares a conventional deterministic Transformer with an
-equivalent Evidential Deep Learning model and evaluates predictive performance,
-probability calibration and uncertainty-based reliability.
+Pedestrian crossing prediction is an important task in autonomous driving, where a vehicle must anticipate whether a pedestrian is likely to enter the road 
+before the crossing action becomes directly observable. Predictive performance alone does not indicate whether a model's confidence is reliable. 
+This project therefore investigates both pedestrian crossing classification and predictive uncertainty. The framework compares a deterministic Transformer with an
+equivalent Evidential Deep Learning model and evaluates predictive performance, probability calibration and reliability.
 
 ## Method Overview
 
 Each pedestrian is represented as a temporal sequence containing combinations
 of:
 
-- bounding-box coordinates;
+- pedestrian bounding-box coordinates;
 - pedestrian centre coordinates;
 - bounding-box area;
-- bounding-box aspect ratio; and
 - ego-vehicle speed.
 
-A lightweight Transformer encoder models the temporal sequence.
+A Transformer encoder is implemented to model the temporal sequence.
 
 Two prediction formulations are supported:
 
 - **Deterministic:** cross-entropy classification with softmax probabilities.
-- **Evidential:** Dirichlet-based Evidential Deep Learning providing both class
-  probabilities and predictive uncertainty.
+- **Evidential:** Dirichlet Evidential Deep Learning providing both class probabilities and predictive uncertainty.
 
-Experiments also investigate feature representation, observation length,
-training augmentation and variation across random seeds.
+Experiments also investigate feature representation, observation length and the effect of training augmentation.
 
 ## Repository Structure
 
 ```text
 .
 ├── configs/                    # Base and experiment configurations
-├── PedestrianActionBenchmark/ # PIE data-loading utilities
+├── PedestrianActionBenchmark/  # PIE data-loading utilities
 ├── data/                       # Cached PIE sequences and processed data
 ├── evaluation/                 # Metrics and evaluation plots
 ├── results/                    # Experimental results
@@ -128,8 +116,7 @@ python scripts/run_multi_seed.py \
     --output-dir results/example
 ```
 
-The multi-seed runner creates an independent configuration and checkpoint
-directory for each seed and produces both per-seed and aggregate results.
+The multi-seed runner creates an independent configuration and checkpoint directory for each seed and produces both per-seed and aggregate results.
 
 Typical outputs include:
 
@@ -156,8 +143,7 @@ Probability reliability is evaluated using:
 - Expected Calibration Error (ECE); and
 - Brier score.
 
-For evidential models, uncertainty behaviour is additionally evaluated using
-uncertainty statistics and risk-coverage analysis.
+For evidential models, uncertainty behaviour is additionally evaluated using risk-coverage analysis.
 
 ## Reproducibility
 
@@ -167,9 +153,8 @@ The experimental pipeline supports reproducibility through:
 - deterministic random seeding;
 - fixed training, validation and test splits;
 - saved resolved configurations;
-- independent checkpoints for each random seed;
-- MLflow experiment tracking; and
-- repeated multi-seed evaluation.
+- independent checkpoints for each random seed; and
+- MLflow experiment tracking
 
 The validation set is used for model selection and decision-threshold tuning.
 The held-out test set is used only for final evaluation.
