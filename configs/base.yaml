@@ -1,0 +1,109 @@
+experiment:
+  name: pedestrian_crossing
+  run_name: base
+
+seed: 42
+
+tags:
+  seed: seed
+
+pie_data:
+  raw_data_directory: data/PIE
+  behaviour_cache_directory: data/cache/PIE_behaviour/obs15
+  processed_cache_directory: data/cache/PIE_processed/obs15
+  cache_enabled: true
+  use_cached_sequences: true
+  regenerate_sequences: false
+  use_cached_processed: false
+  regenerate_processed: true
+  strict_cache: true
+
+model_opts:
+  obs_input_type:
+    - box
+    - speed
+    - center
+  obs_length: 16
+  normalize_boxes: true
+  time_to_event:
+    - 30
+    - 60
+  overlap: 0.5
+  balance_data: true
+  balance_strategy: flip_only
+  generator: false
+
+data_opts:
+  fstride: 1
+  sample_type: beh
+  subset: default
+  data_split_type: default
+  seq_type: crossing
+  min_track_size: 76
+
+feature_opts:
+  use_tabular: true
+  use_center: true
+  use_area: true
+  use_aspect_ratio: false
+
+net_opts:
+  input_dimension: 8
+  d_model: 8
+  ff_dim: 16
+  num_attention_heads: 2
+  num_layers: 1
+  dropout: 0.1
+  dtype: float64
+
+train_opts:
+  batch_size: 64
+  epochs: 2000
+  learning_rate: 0.005
+  weight_decay: 0.0
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  accelerator: cuda
+  devices: 1
+  precision: 64-true
+  deterministic: true
+  log_every_n_steps: 10
+
+uncertainty_opts:
+  enabled: false
+  loss: mse
+  annealing_step: 10
+
+scheduler:
+  enabled: true
+  name: CosineAnnealingLR
+  t_max: 64
+  eta_min: 0.0
+
+early_stopping:
+  enabled: true
+  monitor: val_best_threshold_f1
+  mode: max
+  patience: 100
+  min_delta: 0.00001
+
+evaluation:
+  tune_threshold: true
+
+checkpoint:
+  directory: checkpoints/default
+  monitor: val_best_threshold_f1
+  mode: max
+  save_top_k: 1
+  save_last: false
+  filename: "{epoch:03d}-{val_best_threshold_f1:.4f}"
+
+resume:
+  enabled: false
+  checkpoint_path: null
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  log_model: true
+  log_artifacts: true
