@@ -28,5 +28,5 @@ uncertainty_opts:
   enabled: false
 
 checkpoint:
-  directory: checkpoints/example_deterministic
+  directory: checkpoints/deterministic
   filename: "det-{epoch:03d}-{val_best_threshold_f1:.4f}"
