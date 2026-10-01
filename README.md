@@ -78,8 +78,7 @@ configs/experiments/<experiment>.yaml
 `base.yaml` contains settings shared across experiments, while the experiment
 configuration specifies the condition being evaluated.
 
-Experiment-specific values override the corresponding values in the base
-configuration.
+Experiment values override the corresponding values in the base configuration.
 
 For further information on configuring experiments, see:
 
@@ -143,7 +142,7 @@ Probability reliability is evaluated using:
 - Expected Calibration Error (ECE); and
 - Brier score.
 
-For evidential models, uncertainty behaviour is additionally evaluated using risk-coverage analysis.
+For evidential models, uncertainty behaviour is additionally evaluated using uncertainty statistics and risk-coverage analysis.
 
 ## Reproducibility
 
